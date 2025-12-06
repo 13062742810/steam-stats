@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Lightweight paginated Steam library API
- *
- * - default limit reduced (10) to minimize payload and parsing time
- * - default includeAppInfo=0 (only minimal fields). If includeAppInfo=1 it fetches store appdetails
- *   for the page with controlled concurrency (concurrency default 3).
- * - Cache-Control header and short in-memory TTL cache (ephemeral on serverless).
- *
- * Production recommendations (outside this file):
- * - Use Vercel KV / Redis for persistent cache across instances.
- * - Consider background prefetch (cron) to warm cache for active users.
- * - Use client-side virtualized list (react-window) and incremental loading.
+ * Lightweight paginated Steam library API:
+ * - default limit 10 (low payload)
+ * - default includeAppInfo=0 (no appinfo)
+ * - controlled concurrency for store appinfo (concurrency=2)
+ * - in-memory short cache + Cache-Control header
  */
 
 type CacheEntry = { ts: number; value: any };
@@ -29,8 +23,7 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeout = 1
   }
 }
 
-// limited concurrency mapper
-async function mapWithConcurrency<T, R>(items: T[], fn: (t: T) => Promise<R>, concurrency = 3) {
+async function mapWithConcurrency<T, R>(items: T[], fn: (t: T) => Promise<R>, concurrency = 2) {
   const results: R[] = new Array(items.length);
   let i = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
@@ -65,21 +58,16 @@ export async function GET(req: NextRequest) {
   const start = Date.now();
   try {
     const STEAM_KEY = process.env.STEAM_API_KEY ?? process.env.STEAM_SECRET;
-    if (!STEAM_KEY) {
-      return NextResponse.json({ error: "Server misconfiguration: missing STEAM_API_KEY" }, { status: 500 });
-    }
+    if (!STEAM_KEY) return NextResponse.json({ error: "Server misconfiguration: missing STEAM_API_KEY" }, { status: 500 });
 
     const url = new URL(req.url);
     const steamId = url.searchParams.get("steamId");
-    if (!steamId) {
-      return NextResponse.json({ error: "Missing steamId parameter" }, { status: 400 });
-    }
+    if (!steamId) return NextResponse.json({ error: "Missing steamId parameter" }, { status: 400 });
 
-    // defaults: much smaller page to reduce payload and parsing time
-    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 10))); // default 10
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 10)));
     const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
     const includeAppInfo = url.searchParams.get("includeAppInfo") === "1" ? 1 : 0;
-    const mode = url.searchParams.get("mode") ?? "list"; // list or top
+    const mode = url.searchParams.get("mode") ?? "list";
 
     const cacheKey = `owned:${steamId}:limit=${limit}:off=${offset}:info=${includeAppInfo}:mode=${mode}`;
     const cached = cacheGet(cacheKey);
@@ -111,22 +99,18 @@ export async function GET(req: NextRequest) {
     if (!data || !data.response) return NextResponse.json({ error: "Unexpected Steam response" }, { status: 502 });
 
     const allGames = Array.isArray(data.response.games) ? data.response.games : [];
-
-    // transform to minimal fields for speed (only fields frontend needs for summary)
     const minimal = allGames.map((g: any) => ({
       appid: g.appid,
       playtime_forever: g.playtime_forever ?? 0,
       rtime_last_played: g.rtime_last_played ?? 0,
     }));
 
-    // optionally sort for top mode
     if (mode === "top") {
       minimal.sort((a: any, b: any) => (b.playtime_forever || 0) - (a.playtime_forever || 0));
     }
 
     const pageGames = minimal.slice(offset, offset + limit);
 
-    // when includeAppInfo requested, fetch details for only the page with controlled concurrency
     let detailed: any[] | undefined = undefined;
     if (includeAppInfo && pageGames.length > 0) {
       const fetchApp = async (g: any) => {
@@ -143,9 +127,7 @@ export async function GET(req: NextRequest) {
           return { ...g };
         }
       };
-
-      // controlled concurrency = 3 by default (adjust if you need faster but risk rate-limit)
-      detailed = await mapWithConcurrency(pageGames, fetchApp, 3);
+      detailed = await mapWithConcurrency(pageGames, fetchApp, 2);
     }
 
     const out = {
@@ -156,9 +138,7 @@ export async function GET(req: NextRequest) {
       mode,
     };
 
-    // short in-memory cache
     cacheSet(cacheKey, out);
-
     console.log(`[library] completed in ${Date.now() - start} ms totalCount=${out.totalCount} page=${out.games.length}`);
 
     return NextResponse.json(out, { headers: { "Cache-Control": "public, max-age=60" } });
