@@ -1,9 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 interface GameStats {
   totalGames: number;
@@ -28,6 +23,12 @@ interface GameStats {
     }>;
   };
 }
+
+const API_BASE = process.env.KOURI_API_BASE || "https://api.kourichat.com/v1";
+
+const API_KEY =
+  process.env.KOURI_API_KEY ||
+  "sk-kouri-A3x8VqhNUWpcOcnTGsPhpNfyS2fwt4MKrXXQXGYHKONpLJeT";
 
 export async function POST(request: NextRequest) {
   try {
@@ -88,7 +89,7 @@ ${topGamesList}
 ${reviewsSection}
 ## 分析要求
 
-**重要提醒**：16种MBTI类型在玩家群体中应该是多样化分布的，不要因为Steam以单机游戏为主就倾向于给出I或P的结论。请仔细分析具体游戏特征和玩家行为模式。
+**重要提醒**：16种MBTI类型在玩家群体中应该是多样化分布的，不要因为Steam以单机游戏为主就倾向于给出I或P的结论。请仔细分析具体游戏特征和玩家行[...]
 
 请基于以上数据，特别是玩家最常玩的具体游戏和评测内容，从以下四个维度深度分析该玩家的MBTI类型：
 
@@ -176,20 +177,93 @@ ${reviewsSection}
   }
 }`;
 
-    const response = await openai.responses.create({
+    // Build request payload similar to previous usage
+    const bodyPayload = {
       model: "gpt-5-nano",
+      // NOTE: We keep the original 'instructions' snippet as in your repo (truncated parts preserved).
       instructions:
-        "你是一位专业的MBTI分析师和游戏心理学专家。你的分析必须客观公正，避免刻板印象。关键原则：1) 16种MBTI类型在玩家中分布均匀，不要偏向任何特定类型；2) 玩单机游戏不等于内向，要看动机和风格；3) 游戏库大不等于P型，要看实际行为；4) 每个维度独立判断，用具体游戏证据支持。选择代表游戏时，必须确保多样性——从不同类型的游戏中各选一款。",
+        "你是一位专业的MBTI分析师和游戏心理学专家。你的分析必须客观公正，避免刻板印象。关键原则：1) 16种MBTI类型在玩家中分布均匀，不要偏向任�[...]",
       input: prompt,
       text: {
         format: { type: "json_object" },
       },
+    };
+
+    const res = await fetch(`${API_BASE.replace(/\/$/, "")}/responses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+      body: JSON.stringify(bodyPayload),
     });
 
-    const responseText = response.output_text || "";
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(
+        `Kouri API responded with status ${res.status}: ${errText}`
+      );
+    }
 
-    // JSON mode guarantees valid JSON output
-    const result = JSON.parse(responseText);
+    const data = await res.json();
+
+    // Try to extract the textual output from a few possible response shapes
+    let responseText = "";
+
+    if (typeof data.output_text === "string" && data.output_text.trim()) {
+      responseText = data.output_text;
+    } else if (typeof data.output === "string" && data.output.trim()) {
+      responseText = data.output;
+    } else if (Array.isArray(data.output) && data.output.length > 0) {
+      // search common nested structures
+      for (const out of data.output) {
+        if (typeof out === "string" && out.trim()) {
+          responseText = out;
+          break;
+        }
+        if (out?.content && Array.isArray(out.content)) {
+          const candidate = out.content
+            .map((c: any) => c?.text || c?.type === "output_text" && c?.text)
+            .filter(Boolean)[0];
+          if (candidate) {
+            responseText = candidate;
+            break;
+          }
+        }
+      }
+    } else if (data.choices && data.choices[0]) {
+      responseText =
+        data.choices[0].message?.content ||
+        data.choices[0].text ||
+        JSON.stringify(data.choices[0]);
+    } else if (data.data && Array.isArray(data.data) && data.data[0]) {
+      // some APIs nest outputs in data[0].output_text or data[0].output
+      responseText =
+        data.data[0].output_text ||
+        (data.data[0].output && JSON.stringify(data.data[0].output)) ||
+        "";
+    }
+
+    // Fallback: stringify entire response if nothing else
+    if (!responseText) {
+      responseText = JSON.stringify(data);
+    }
+
+    let result: any;
+    try {
+      if (typeof responseText === "string") {
+        result = JSON.parse(responseText);
+      } else {
+        result = responseText;
+      }
+    } catch (err) {
+      // If the model returned plain text or non-JSON, include raw text and full API response
+      result = {
+        parseError: (err as Error).message,
+        rawText: responseText,
+        apiResponse: data,
+      };
+    }
 
     return NextResponse.json(result);
   } catch (error) {
