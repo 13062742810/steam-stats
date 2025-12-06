@@ -13,7 +13,7 @@ async function handler(
     (req?.nextUrl?.origin ? String(req.nextUrl.origin).replace(/\/$/, "") : "");
 
   // 支持两个 ENV 名称，避免命名不一致的问题
-  const steamKey = process.env.STEAM_SECRET || process.env.STEAM_API_KEY;
+  const steamKey = process.env.STEAM_SECRET ?? process.env.STEAM_API_KEY;
   const nextAuthSecret = process.env.NEXTAUTH_SECRET;
 
   const missing: string[] = [];
@@ -29,19 +29,25 @@ async function handler(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
+  // 在日志中仅记录是否存在（不要打印密钥）
+  console.log("NEXTAUTH_URL present:", !!origin);
+  console.log("NEXTAUTH_SECRET present:", !!nextAuthSecret);
+  console.log("STEAM key present:", !!steamKey);
+
   const callbackUrl = `${origin}/api/auth/callback`;
 
   return NextAuth(req, ctx, {
     providers: [
+      // 已在上方运行时检查 steamKey 存在，使用非空断言告诉 TS 这是 string
       SteamProvider(req, {
-        clientSecret: steamKey,
+        clientSecret: steamKey!,
         callbackUrl,
       }),
     ],
     pages: {
       error: "/auth/error",
     },
-    secret: nextAuthSecret,
+    secret: nextAuthSecret!,
     callbacks: {
       async session({ session, token }) {
         if (session?.user) {
