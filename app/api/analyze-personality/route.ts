@@ -89,7 +89,7 @@ ${topGamesList}
 ${reviewsSection}
 ## 分析要求
 
-**重要提醒**：16种MBTI类型在玩家群体中应该是多样化分布的，不要因为Steam以单机游戏为主就倾向于给出I或P的结论。请仔细分析具体游戏特征和玩家行[...]
+**重要提醒**：16种MBTI类型在玩家群体中应该是多样化分布的，不要因为Steam以单机游戏为主就倾向于给出I或P的结论。请仔细分析具体游戏特征和玩家行为特征。
 
 请基于以上数据，特别是玩家最常玩的具体游戏和评测内容，从以下四个维度深度分析该玩家的MBTI类型：
 
@@ -182,7 +182,7 @@ ${reviewsSection}
       model: "gpt-5-nano",
       // NOTE: We keep the original 'instructions' snippet as in your repo (truncated parts preserved).
       instructions:
-        "你是一位专业的MBTI分析师和游戏心理学专家。你的分析必须客观公正，避免刻板印象。关键原则：1) 16种MBTI类型在玩家中分布均匀，不要偏向任�[...]",
+        " 你是一位专业的MBTI分析师和游戏心理学专家。你的分析必须客观公正，避免刻板印象。关键原则：1) 16种MBTI类型在玩家中分布均匀，不要偏向任何特定类型；2) 玩单机游戏不等于内向，要看动机和风格；3) 游戏库大不等于P型，要看实际行为；4) 每个维度独立判断，用具体游戏证据支持。选择代表游戏时，必须确保多样性——从不同类型的游戏中各选一款。",
       input: prompt,
       text: {
         format: { type: "json_object" },
